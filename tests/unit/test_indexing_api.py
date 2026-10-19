@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from types import SimpleNamespace
 
 import pymupdf
@@ -55,8 +54,7 @@ class EmptyRetrievalService:
         return []
 
 
-def test_upload_indexes_document_and_makes_it_searchable(tmp_path, monkeypatch, caplog):
-    caplog.set_level(logging.INFO)
+def test_upload_indexes_document_and_makes_it_searchable(tmp_path, monkeypatch):
     vector_store = QdrantVectorStore(
         client=QdrantClient(location=":memory:"),
         collection_name="test_document_upload",
@@ -104,9 +102,10 @@ def test_upload_indexes_document_and_makes_it_searchable(tmp_path, monkeypatch, 
     assert indexed["statistics"]["embedding_model"] == "intfloat/multilingual-e5-small"
 
     stored_metadata = tmp_path / "processed" / f"{indexed['document_id']}.json"
-    assert json.loads(stored_metadata.read_text(encoding="utf-8"))["document_id"] == indexed[
-        "document_id"
-    ]
+    assert (
+        json.loads(stored_metadata.read_text(encoding="utf-8"))["document_id"]
+        == indexed["document_id"]
+    )
     assert search_response.status_code == 200
     hits = search_response.json()["results"]
     assert hits[0]["document_id"] == indexed["document_id"]
@@ -121,30 +120,6 @@ def test_upload_indexes_document_and_makes_it_searchable(tmp_path, monkeypatch, 
     assert answer["sources"][0]["citation_id"] == "[1]"
     prompt = llm_client.chat.completions.request["messages"][1]["content"]
     assert "Arabic document indexing integration test" in prompt
-
-    memory_logs = [
-        record.getMessage()
-        for record in caplog.records
-        if "memory_peak_rss_mb=" in record.getMessage()
-    ]
-    measured_stages = {
-        stage
-        for record in memory_logs
-        for stage in (
-            "pdf_extraction",
-            "chunking",
-            "embedding_generation",
-            "qdrant_indexing",
-        )
-        if f"stage={stage} " in record
-    }
-    assert measured_stages == {
-        "pdf_extraction",
-        "chunking",
-        "embedding_generation",
-        "qdrant_indexing",
-    }
-    assert all("memory_delta_mb=" in record for record in memory_logs)
 
 
 def test_answer_without_matching_context_does_not_call_llm(monkeypatch):

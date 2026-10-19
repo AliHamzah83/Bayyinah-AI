@@ -1,89 +1,98 @@
-# Arabic Intelligent Knowledge Assistant
+# Arabic RAG System
 
-This project is the foundation for an Arabic Retrieval-Augmented Generation (RAG) system designed to answer questions from Arabic PDF documents with grounded citations and enterprise-friendly architecture.
+Arabic RAG System is a prototype for indexing Arabic PDF documents and answering
+questions from their contents with retrieved source passages. It consists of a
+FastAPI backend, a Streamlit interface, Sentence Transformers embeddings, and a
+Qdrant vector store.
 
-## Document indexing API
+## Current capabilities
 
-The API accepts PDF uploads, extracts and normalizes their text, chunks each page,
-generates dense embeddings, and stores the vectors and source metadata in Qdrant.
-The structured extraction and document metadata are also persisted as JSON under
-`data/processed/`.
+- **PDF upload:** Upload PDFs through the API or Streamlit. Native page text is
+  extracted; image-only pages can be processed with Tesseract OCR and Arabic and
+  English language data. Uploads are limited to 50 MiB and 500 pages by default.
+- **Indexing:** Arabic text is normalized and split into chunks. Each chunk gets
+  a dense embedding and source/page metadata, and is indexed in Qdrant. Structured
+  extraction metadata is written locally as JSON under `data/processed/`.
+- **Retrieval:** Search returns the highest-scoring passages with page and source
+  metadata. The answer endpoint uses retrieved passages to generate an answer
+  with citations.
+- **Streamlit UI:** The browser interface uploads and indexes PDFs, shows
+  indexing counts, previews retrieved passages, and submits questions for
+  cited answers.
+- **Embedding model:** `intfloat/multilingual-e5-small`, producing normalized
+  384-dimensional vectors. The model is loaded on first use and may be
+  downloaded by Sentence Transformers if it is not cached locally.
 
-Embeddings use `intfloat/multilingual-e5-small` (384 dimensions) and are stored in
-the configured `QDRANT_COLLECTION_NAME` collection. The default collection is
-`arabic_documents_e5_small`, sized for the 384-dimensional multilingual-E5-small
-embeddings. This collection is separate from the existing 1024-dimensional
-`arabic_documents` collection.
+## Requirements
 
-Start the API with `uvicorn app.main:app --reload`. Configure Qdrant with
-`QDRANT_HOST`, `QDRANT_PORT`, and `QDRANT_COLLECTION_NAME`; the default connection is
-`http://localhost:6333`. Install the packages in `requirements.txt`, including
-`python-multipart`, to enable file uploads. The model is loaded by Sentence Transformers
-on the first indexing or search request. The API console logs INFO-level stage markers for
-upload, ingestion, chunking, embedding-model initialization, embedding, Qdrant indexing,
-retrieval, and answer generation; the last marker before an unexpected process exit
-identifies the operation in progress.
+- Python 3.11 or newer.
+- A Qdrant service reachable by the API (defaults to `http://localhost:6333`).
+- An OpenAI API key for generated answers. PDF indexing and passage retrieval
+  use the embedding model and Qdrant, but do not require the OpenAI key.
+- Tesseract OCR with Arabic (`ara`) and English (`eng`) trained data for scanned
+  PDFs. OCR is not needed for PDFs with extractable text.
 
-### Upload a PDF
+## Run locally
 
-`POST /api/v1/documents/upload` accepts a multipart form field named `file`. A
-successful request returns HTTP 201 with the document ID, stored source metadata,
-chunking statistics, and embedding statistics. PDFs with invalid content or no
-extractable text return HTTP 422; unsupported file extensions return HTTP 415.
-Uploads over 50 MiB return HTTP 413, and PDFs over 500 pages return HTTP 422 by
-default. Configure `MAX_PDF_SIZE_BYTES` and `MAX_PDF_PAGES` to change these limits.
-Embedding and Qdrant persistence run in bounded batches; INFO logs include sampled
-RSS, peak RSS, and peak increase for extraction, chunking, embedding, and Qdrant stages.
-The Streamlit client forwards the uploaded file stream directly instead of creating
-an additional full-size in-memory byte copy.
+Create and activate a virtual environment, then install dependencies:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/documents/upload \
-	-F "file=@./arabic-report.pdf;type=application/pdf"
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-### Search indexed documents
+Copy `.env.example` to `.env` and update the values as needed. In particular,
+set `OPENAI_API_KEY` to use answer generation and configure `QDRANT_HOST`,
+`QDRANT_PORT`, and `QDRANT_COLLECTION_NAME` for your Qdrant service. The default
+collection is `arabic_documents_e5_small`. Do not commit `.env` or place real
+credentials in `.env.example`.
 
-Use the returned document metadata as part of the source citation in the retrieval
-response. Search the indexed collection with:
+Start the API and UI in separate terminals:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/retrieval/search \
-	-H "Content-Type: application/json" \
-	-d '{"query":"ما موضوع التقرير؟","top_k":5}'
-```
-
-### Generate a cited answer
-
-Set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env` (the default model is
-`gpt-4o-mini`). The answer endpoint retrieves relevant chunks, builds a grounded
-Arabic prompt, and returns the answer with page-level source citations. If no
-matching chunks are found, it returns an Arabic no-context response without
-calling the LLM.
-
-```bash
-curl -X POST http://localhost:8000/api/v1/retrieval/answer \
-	-H "Content-Type: application/json" \
-	-d '{"query":"ما موضوع التقرير؟","top_k":5}'
-```
-
-The response includes `answer`, the configured `model`, and a `sources` array
-containing each citation ID, document ID, filename, page number, passage, and
-retrieval score. Configure `OPENAI_API_KEY` before requesting an answer with
-retrieved context.
-
-## Streamlit MVP
-
-Run the API and UI in separate terminals. The UI defaults to
-`http://127.0.0.1:8000`; set `API_BASE_URL` if the API is hosted elsewhere.
-
-```bash
+```powershell
 uvicorn app.main:app --reload
 streamlit run app/frontend/streamlit_app.py
 ```
 
-The UI uploads PDFs for indexing, displays page/chunk/vector counts, and sends
-questions to the cited-answer endpoint. The retrieval preview can search the
-indexed collection independently and show matching passages with source pages and
-relevance scores. Answer generation requires a configured `OPENAI_API_KEY`;
-indexing and retrieval also require the configured Qdrant service and model access.
+The Streamlit UI defaults to the API at `http://127.0.0.1:8000`; set
+`API_BASE_URL` if it is hosted elsewhere. The API exposes:
+
+- `POST /api/v1/documents/upload` — multipart PDF upload using the `file` field.
+- `POST /api/v1/retrieval/search` — retrieve passages for a JSON `query` and
+  optional `top_k` (1–20, default 5).
+- `POST /api/v1/retrieval/answer` — generate a cited answer for a JSON `query`
+  and optional `top_k`.
+
+The API docs are available at `http://127.0.0.1:8000/docs` when it is running.
+
+## Known limitations
+
+- This is an early-stage prototype, not a production-hardened service. It has no
+  authentication, authorization, or multi-user document isolation.
+- PDF is the only supported upload format. Scanned-document OCR requires a
+  separately installed Tesseract executable and Arabic/English language data;
+  extraction quality varies with document quality and layout.
+- Retrieval is dense-vector search over the configured Qdrant collection; answer
+  quality depends on the source text, chunking, embedding model, retrieved
+  context, and configured OpenAI model.
+- The embedding model may need to be downloaded on first use. Model inference
+  and OCR can require substantial memory and processing time.
+- Persisted extracted documents and vector data are local/runtime data and are
+  intentionally excluded from version control. Back them up separately if
+  needed.
+- Default settings are for local development and are not a production security
+  configuration.
+
+## Project structure
+
+See [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for the directory and
+component overview.
+
+## Tests
+
+Run the test suite from the repository root:
+
+```powershell
+python -m pytest
+```

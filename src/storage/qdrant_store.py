@@ -13,7 +13,6 @@ from qdrant_client.http import models as qmodels
 
 from src.chunking import TextChunk
 from src.core.exceptions import VectorStoreConnectionError
-from src.core.memory import measure_memory
 from src.core.settings import get_settings
 from src.embeddings import EmbeddingBatch, EmbeddingPerformance, EmbeddingService
 
@@ -118,43 +117,42 @@ class QdrantVectorStore:
         if vectors is not None and len(vectors) != len(chunks):
             raise ValueError("vectors length must match chunks length")
 
-        with measure_memory("qdrant_indexing", points=len(chunks)):
-            points = []
-            for index, chunk in enumerate(chunks):
-                vector = list(vectors[index]) if vectors is not None else [0.0] * self.vector_size
-                payload = {
-                    "chunk_id": chunk.chunk_id,
-                    "document_id": chunk.document_id,
-                    "text": chunk.text,
-                    "source_text": chunk.source_text,
-                    "source_filename": chunk.source_filename,
-                    "page_number": chunk.page_number,
-                    "page_language": chunk.page_language,
-                    "extraction_method": chunk.extraction_method,
-                    "chunk_index": chunk.chunk_index,
-                    "strategy": chunk.strategy,
-                    "metadata": chunk.source_metadata,
-                    "source_metadata": chunk.source_metadata,
-                }
-                points.append(
-                    qmodels.PointStruct(
-                        id=_point_id(chunk.chunk_id),
-                        vector=vector,
-                        payload=payload,
-                    )
+        points = []
+        for index, chunk in enumerate(chunks):
+            vector = list(vectors[index]) if vectors is not None else [0.0] * self.vector_size
+            payload = {
+                "chunk_id": chunk.chunk_id,
+                "document_id": chunk.document_id,
+                "text": chunk.text,
+                "source_text": chunk.source_text,
+                "source_filename": chunk.source_filename,
+                "page_number": chunk.page_number,
+                "page_language": chunk.page_language,
+                "extraction_method": chunk.extraction_method,
+                "chunk_index": chunk.chunk_index,
+                "strategy": chunk.strategy,
+                "metadata": chunk.source_metadata,
+                "source_metadata": chunk.source_metadata,
+            }
+            points.append(
+                qmodels.PointStruct(
+                    id=_point_id(chunk.chunk_id),
+                    vector=vector,
+                    payload=payload,
                 )
-            if points:
-                logger.info(
-                    "stage=qdrant_indexing status=started collection=%s points=%s",
-                    self.collection_name,
-                    len(points),
-                )
-                self.client.upsert(collection_name=self.collection_name, points=points)
-                logger.info(
-                    "stage=qdrant_indexing status=completed collection=%s points=%s",
-                    self.collection_name,
-                    len(points),
-                )
+            )
+        if points:
+            logger.info(
+                "stage=qdrant_indexing status=started collection=%s points=%s",
+                self.collection_name,
+                len(points),
+            )
+            self.client.upsert(collection_name=self.collection_name, points=points)
+            logger.info(
+                "stage=qdrant_indexing status=completed collection=%s points=%s",
+                self.collection_name,
+                len(points),
+            )
 
     def search(
         self,
@@ -238,20 +236,15 @@ class RetrievalService:
         generation_seconds = 0.0
         for start in range(0, len(chunks), chunks_per_batch):
             chunk_batch = chunks[start : start + chunks_per_batch]
-            with measure_memory(
-                "index_batch",
-                batch_number=start // chunks_per_batch + 1,
-                chunks=len(chunk_batch),
-            ):
-                batch: EmbeddingBatch = self.embedding_service.embed_chunks(chunk_batch)
-                model_load_seconds += batch.performance.model_load_seconds
-                generation_seconds += batch.performance.generation_seconds
-                self.vector_store.index_chunks(
-                    chunk_batch,
-                    vectors=[item.vector for item in batch.embeddings],
-                )
-                count += len(batch.embeddings)
-                del batch
+            batch: EmbeddingBatch = self.embedding_service.embed_chunks(chunk_batch)
+            model_load_seconds += batch.performance.model_load_seconds
+            generation_seconds += batch.performance.generation_seconds
+            self.vector_store.index_chunks(
+                chunk_batch,
+                vectors=[item.vector for item in batch.embeddings],
+            )
+            count += len(batch.embeddings)
+            del batch
 
         total_seconds = perf_counter() - total_started
         return IndexingSummary(

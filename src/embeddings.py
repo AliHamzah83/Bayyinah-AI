@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import faulthandler
 import hashlib
 import importlib
 import logging
@@ -16,7 +15,6 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.chunking import TextChunk
-from src.core.memory import measure_memory
 
 
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
@@ -57,8 +55,6 @@ class _SentenceTransformerEncoder:
             model_name,
             device or "auto",
         )
-        if not faulthandler.is_enabled():
-            faulthandler.enable()
         try:
             self._model = sentence_transformers.SentenceTransformer(model_name, **options)
         except Exception as exc:
@@ -287,68 +283,62 @@ class EmbeddingService:
             raise EmbeddingError("Cannot generate an embedding for an empty chunk")
 
         total_started = perf_counter()
-        with measure_memory("embedding_model_load", model=self.model_name):
-            encoder, model_load_seconds = self._get_encoder()
+        encoder, model_load_seconds = self._get_encoder()
         generation_started = perf_counter()
         embedded: list[EmbeddedChunk] = []
         batch_count = (len(chunks) + self.batch_size - 1) // self.batch_size
-        with measure_memory(
-            "embedding_generation",
-            chunks=len(chunks),
-            batch_size=self.batch_size,
-        ):
-            for batch_number, chunk_batch in enumerate(_batches(chunks, self.batch_size), start=1):
-                logger.info(
-                    "stage=embedding_generation status=started batch=%s/%s chunks=%s",
-                    batch_number,
-                    batch_count,
-                    len(chunk_batch),
+        for batch_number, chunk_batch in enumerate(_batches(chunks, self.batch_size), start=1):
+            logger.info(
+                "stage=embedding_generation status=started batch=%s/%s chunks=%s",
+                batch_number,
+                batch_count,
+                len(chunk_batch),
+            )
+            try:
+                encoded = encoder.encode(
+                    [chunk.text for chunk in chunk_batch],
+                    batch_size=self.batch_size,
+                    input_type="passage",
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
                 )
-                try:
-                    encoded = encoder.encode(
-                        [chunk.text for chunk in chunk_batch],
-                        batch_size=self.batch_size,
-                        input_type="passage",
-                        convert_to_numpy=True,
-                        normalize_embeddings=True,
-                        show_progress_bar=False,
-                    )
-                except Exception as exc:
-                    raise EmbeddingError("Dense embedding generation failed") from exc
-                vectors = _as_vectors(encoded)
-                if len(vectors) != len(chunk_batch):
-                    raise EmbeddingError(
-                        f"Encoder returned {len(vectors)} vectors for {len(chunk_batch)} chunks"
-                    )
-                for chunk, vector in zip(chunk_batch, vectors, strict=True):
-                    normalized_vector = _normalize_vector(vector, self.expected_dimensions)
-                    source = {
-                        "filename": chunk.source_filename,
-                        "source_text": chunk.source_text,
-                        "source_start": chunk.source_start,
-                        "source_end": chunk.source_end,
-                        "page_language": chunk.page_language,
-                        "extraction_method": chunk.extraction_method,
-                        "metadata": chunk.source_metadata,
-                    }
-                    embedded.append(
-                        EmbeddedChunk(
-                            chunk_id=chunk.chunk_id,
-                            document_id=chunk.document_id,
-                            page_number=chunk.page_number,
-                            source=source,
-                            text=chunk.text,
-                            model_name=self.model_name,
-                            dimensions=self.expected_dimensions,
-                            vector=normalized_vector,
-                        )
-                    )
-                logger.info(
-                    "stage=embedding_generation status=completed batch=%s/%s chunks=%s",
-                    batch_number,
-                    batch_count,
-                    len(chunk_batch),
+            except Exception as exc:
+                raise EmbeddingError("Dense embedding generation failed") from exc
+            vectors = _as_vectors(encoded)
+            if len(vectors) != len(chunk_batch):
+                raise EmbeddingError(
+                    f"Encoder returned {len(vectors)} vectors for {len(chunk_batch)} chunks"
                 )
+            for chunk, vector in zip(chunk_batch, vectors, strict=True):
+                normalized_vector = _normalize_vector(vector, self.expected_dimensions)
+                source = {
+                    "filename": chunk.source_filename,
+                    "source_text": chunk.source_text,
+                    "source_start": chunk.source_start,
+                    "source_end": chunk.source_end,
+                    "page_language": chunk.page_language,
+                    "extraction_method": chunk.extraction_method,
+                    "metadata": chunk.source_metadata,
+                }
+                embedded.append(
+                    EmbeddedChunk(
+                        chunk_id=chunk.chunk_id,
+                        document_id=chunk.document_id,
+                        page_number=chunk.page_number,
+                        source=source,
+                        text=chunk.text,
+                        model_name=self.model_name,
+                        dimensions=self.expected_dimensions,
+                        vector=normalized_vector,
+                    )
+                )
+            logger.info(
+                "stage=embedding_generation status=completed batch=%s/%s chunks=%s",
+                batch_number,
+                batch_count,
+                len(chunk_batch),
+            )
         finished = perf_counter()
         generation_seconds = finished - generation_started
         total_seconds = finished - total_started
@@ -364,9 +354,9 @@ class EmbeddingService:
                 model_load_seconds=model_load_seconds,
                 generation_seconds=generation_seconds,
                 total_seconds=total_seconds,
-                chunks_per_second=len(embedded) / generation_seconds
-                if generation_seconds > 0
-                else 0.0,
+                chunks_per_second=(
+                    len(embedded) / generation_seconds if generation_seconds > 0 else 0.0
+                ),
             ),
         )
 

@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.chunking import ChunkStatistics, chunk_document
 from src.embeddings import EmbeddingPerformance
-from src.core.memory import measure_memory
 from src.ingestion.models import DocumentMetadata
 from src.ingestion.pipeline import ingest_pdf
 from src.storage.qdrant_store import RetrievalService
@@ -69,8 +68,7 @@ class DocumentIndexingService:
         )
 
         logger.info("stage=chunking status=started document_id=%s", document.document_id)
-        with measure_memory("chunking", pages=document.metadata.page_count):
-            chunking_result = chunk_document(document)
+        chunking_result = chunk_document(document)
         if not chunking_result.chunks:
             raise NoIndexableContentError("PDF contains no extractable text to index")
         logger.info(

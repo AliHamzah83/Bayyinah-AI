@@ -11,10 +11,9 @@ import pymupdf
 import pytesseract
 from PIL import Image
 
+from src.core.settings import get_settings
 from src.ingestion.arabic_text import detect_language, normalize_arabic_text
 from src.ingestion.models import DocumentMetadata, IngestedDocument, PageContent
-from src.core.memory import measure_memory
-from src.core.settings import get_settings
 
 _OCR_DPI = 200
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -44,59 +43,58 @@ def load_pdf(
         raise PDFIngestionError(f"PDF exceeds the maximum file size of {maximum_mb:.0f} MB")
 
     try:
-        with measure_memory("pdf_extraction", file_size_bytes=file_size):
-            with pymupdf.open(path) as pdf:
-                if pdf.is_encrypted:
-                    raise PDFIngestionError("Encrypted PDFs are not supported")
-                if pdf.page_count < 1:
-                    raise PDFIngestionError("PDF contains no pages")
-                if pdf.page_count > settings.max_pdf_pages:
-                    raise PDFIngestionError(
-                        f"PDF exceeds the maximum page count of {settings.max_pdf_pages}"
-                    )
+        with pymupdf.open(path) as pdf:
+            if pdf.is_encrypted:
+                raise PDFIngestionError("Encrypted PDFs are not supported")
+            if pdf.page_count < 1:
+                raise PDFIngestionError("PDF contains no pages")
+            if pdf.page_count > settings.max_pdf_pages:
+                raise PDFIngestionError(
+                    f"PDF exceeds the maximum page count of {settings.max_pdf_pages}"
+                )
 
-                pages = []
-                for page_number, page in enumerate(pdf, start=1):
-                    raw_text = page.get_text("text", sort=True)
-                    extraction_method = "native"
-                    if not raw_text.strip():
-                        if page.get_images(full=True):
-                            try:
-                                pixmap = page.get_pixmap(dpi=_OCR_DPI, alpha=False)
-                                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
-                                raw_text = pytesseract.image_to_string(image, lang="ara+eng")
-                                extraction_method = "ocr"
-                                del image, pixmap
-                            except pytesseract.TesseractNotFoundError as exc:
-                                raise PDFIngestionError(
-                                    "Scanned PDF pages require Tesseract OCR with Arabic language data"
-                                ) from exc
-                            except pytesseract.TesseractError as exc:
-                                raise PDFIngestionError(
-                                    "OCR failed; verify Tesseract and its ara/eng language data"
-                                ) from exc
-                        else:
-                            extraction_method = "none"
-                    normalized_text = normalize_arabic_text(
-                        raw_text,
-                        normalize_teh_marbuta=normalize_teh_marbuta,
+            pages = []
+            for page_number, page in enumerate(pdf, start=1):
+                raw_text = page.get_text("text", sort=True)
+                extraction_method = "native"
+                if not raw_text.strip():
+                    if page.get_images(full=True):
+                        try:
+                            pixmap = page.get_pixmap(dpi=_OCR_DPI, alpha=False)
+                            image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+                            raw_text = pytesseract.image_to_string(image, lang="ara+eng")
+                            extraction_method = "ocr"
+                            del image, pixmap
+                        except pytesseract.TesseractNotFoundError as exc:
+                            raise PDFIngestionError(
+                                "Scanned PDF pages require Tesseract OCR with Arabic language data"
+                            ) from exc
+                        except pytesseract.TesseractError as exc:
+                            raise PDFIngestionError(
+                                "OCR failed; verify Tesseract and its ara/eng language data"
+                            ) from exc
+                    else:
+                        extraction_method = "none"
+                normalized_text = normalize_arabic_text(
+                    raw_text,
+                    normalize_teh_marbuta=normalize_teh_marbuta,
+                )
+                pages.append(
+                    PageContent(
+                        page_number=page_number,
+                        raw_text=raw_text,
+                        normalized_text=normalized_text,
+                        language=detect_language(raw_text),
+                        extraction_method=extraction_method,
+                        character_count=len(raw_text),
+                        has_text=bool(normalized_text),
                     )
-                    pages.append(
-                        PageContent(
-                            page_number=page_number,
-                            raw_text=raw_text,
-                            normalized_text=normalized_text,
-                            language=detect_language(raw_text),
-                            extraction_method=extraction_method,
-                            character_count=len(raw_text),
-                            has_text=bool(normalized_text),
-                        )
-                    )
-                pdf_metadata = {
-                    str(key): str(value)
-                    for key, value in (pdf.metadata or {}).items()
-                    if value not in (None, "")
-                }
+                )
+            pdf_metadata = {
+                str(key): str(value)
+                for key, value in (pdf.metadata or {}).items()
+                if value not in (None, "")
+            }
     except PDFIngestionError:
         raise
     except (OSError, pymupdf.FileDataError, pymupdf.EmptyFileError, RuntimeError) as exc:
@@ -118,9 +116,7 @@ def load_pdf(
     extraction_status = (
         "no_text"
         if pages_with_text == 0
-        else "complete"
-        if pages_with_text == len(pages)
-        else "partial"
+        else "complete" if pages_with_text == len(pages) else "partial"
     )
     file_digest = hashlib.sha256()
     with path.open("rb") as source_file:
