@@ -1,0 +1,19 @@
+[project]
+name = "arabic-rag-system"
+version = "0.1.0"
+description = "Arabic Intelligent Knowledge Assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.black]
+line-length = 100
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
