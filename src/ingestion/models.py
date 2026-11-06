@@ -37,7 +37,6 @@ class DocumentMetadata(BaseModel):
     mime_type: Literal["application/pdf"] = "application/pdf"
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     page_count: int = Field(ge=1)
-    uploaded_at: datetime
     extracted_at: datetime
     pdf_metadata: dict[str, str] = Field(default_factory=dict)
     language_counts: dict[str, int] = Field(default_factory=dict)

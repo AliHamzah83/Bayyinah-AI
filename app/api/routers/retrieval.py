@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import traceback
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -12,6 +15,7 @@ from src.answering import AnswerGenerationService, AnswerResult
 from src.storage.qdrant_store import RetrievalHit, RetrievalService
 
 router = APIRouter(prefix="/api/v1/retrieval", tags=["retrieval"])
+logger = logging.getLogger(__name__)
 
 
 class RetrievalQuery(BaseModel):
@@ -35,7 +39,16 @@ async def answer_question(
             top_k=payload.top_k,
         )
     except Exception as exc:  # pragma: no cover - external LLM/vector services
-        raise HTTPException(status_code=503, detail="Answer generation service unavailable") from exc
+        stack_trace = traceback.format_exc()
+        logger.exception("Answer generation failed")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "stack_trace": stack_trace,
+            },
+        ) from exc
 
 
 @router.post("/search")

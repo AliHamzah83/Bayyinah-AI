@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 from src.ingestion.models import IngestedDocument
@@ -39,15 +38,8 @@ def save_ingested_document(
 def ingest_pdf(
     file_path: str | Path,
     output_dir: str | Path = Path("data/processed"),
-    *,
-    uploaded_at: datetime | None = None,
-    normalize_teh_marbuta: bool = False,
 ) -> IngestedDocument:
     """Load a PDF and persist its structured extraction result as UTF-8 JSON."""
-    document = load_pdf(
-        file_path,
-        uploaded_at=uploaded_at,
-        normalize_teh_marbuta=normalize_teh_marbuta,
-    )
+    document = load_pdf(file_path)
     save_ingested_document(document, output_dir)
     return document

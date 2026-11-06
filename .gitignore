@@ -1,80 +1,22 @@
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Secrets and local configuration
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
 .env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-*.token
-*.secret
-credentials.json
-credentials.yaml
-credentials.yml
-credentials.ini
-service-account*.json
-id_rsa*
-id_ed25519*
-.netrc
-.pypirc
-.npmrc
-/secrets/
-
-# Python environments, caches, and test output
 .venv/
 venv/
-env/
 .pytest_cache/
 .mypy_cache/
-.ruff_cache/
 .coverage
 htmlcov/
-.cache/
-**/.cache/
-huggingface/
-transformers/
-sentence_transformers/
-torch/
-
-# IDE and operating-system files
 .DS_Store
-Thumbs.db
 .idea/
 .vscode/
-
-# Logs and temporary files
 *.log
-*.tmp
-*.temp
-*.swp
-*.bak
-tmp/
-temp/
 
-# Local documents, vector-store state, and generated output
-/data/
-/storage/
-/snapshots/
-/output.json
-/.qdrant-initialized
-*.sqlite
-*.sqlite3
-*.db
-
-# Downloaded model weights and checkpoints
-models/
-checkpoints/
-*.safetensors
-*.bin
-*.pt
-*.pth
-*.ckpt
-*.onnx
-*.gguf
-*.tflite
-*.h5
-*.pb
+# local data
+/data/raw/uploads/*
+!/data/raw/uploads/.gitkeep
+/data/processed/*
+!/data/processed/.gitkeep

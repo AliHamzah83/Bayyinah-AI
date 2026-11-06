@@ -12,7 +12,7 @@ from qdrant_client import QdrantClient
 from app.api.routers import indexing as indexing_router
 from app.api.dependencies.indexing import get_indexing_service
 from app.api.dependencies.retrieval import get_retrieval_service
-from app.api.dependencies.answering import get_answering_service
+from app.api.dependencies.answering import ANSWER_COLLECTION_NAME, get_answering_service
 from app.main import app
 from src.answering import AnswerGenerationService
 from src.embeddings import EmbeddingService
@@ -115,11 +115,68 @@ def test_upload_indexes_document_and_makes_it_searchable(tmp_path, monkeypatch):
     answer = answer_response.json()
     assert answer["model"] == "test-model"
     assert "indexing workflow" in answer["answer"]
-    assert "[1] integration.pdf، الصفحة 1." in answer["answer"]
+    assert "- [1] integration.pdf, page 1" in answer["answer"]
     assert answer["sources"][0]["document_id"] == indexed["document_id"]
     assert answer["sources"][0]["citation_id"] == "[1]"
+    assert llm_client.chat.completions.request["model"] == "test-model"
     prompt = llm_client.chat.completions.request["messages"][1]["content"]
     assert "Arabic document indexing integration test" in prompt
+
+
+def test_answering_uses_configured_ollama_model_and_endpoint(monkeypatch):
+    settings = SimpleNamespace(
+        ollama_base_url="http://ollama-host:11434/v1",
+        ollama_model="qwen2.5:3b",
+    )
+    monkeypatch.setattr("src.answering.get_settings", lambda: settings)
+    created_clients = []
+    llm_client = FixedOpenAIClient()
+
+    def make_client(**kwargs):
+        created_clients.append(kwargs)
+        return llm_client
+
+    monkeypatch.setattr("src.answering.OpenAI", make_client)
+    hit = SimpleNamespace(
+        document_id="document-1",
+        source_filename="source.pdf",
+        page_number=1,
+        text="معلومة من المستند",
+        score=0.9,
+    )
+
+    class RetrievalWithContext:
+        def search(self, _query, *, top_k=5):
+            return [hit]
+
+    service = AnswerGenerationService(retrieval_service=RetrievalWithContext())
+    result = service.answer("ما المعلومة؟")
+
+    assert result.model == "qwen2.5:3b"
+    assert created_clients == [
+        {"api_key": "ollama", "base_url": "http://ollama-host:11434/v1"}
+    ]
+    assert llm_client.chat.completions.request["model"] == "qwen2.5:3b"
+
+
+def test_answering_uses_e5_small_collection(monkeypatch):
+    retrieval_service = EmptyRetrievalService()
+    requested_collections = []
+
+    def make_retrieval_service(*, collection_name=None):
+        requested_collections.append(collection_name)
+        return retrieval_service
+
+    monkeypatch.setattr(
+        "app.api.dependencies.answering.get_retrieval_service",
+        make_retrieval_service,
+    )
+
+    service = get_answering_service()
+
+    assert requested_collections == [ANSWER_COLLECTION_NAME]
+    assert ANSWER_COLLECTION_NAME == "arabic_documents_e5_small"
+    assert service.retrieval_service is retrieval_service
 
 
 def test_answer_without_matching_context_does_not_call_llm(monkeypatch):
@@ -139,7 +196,12 @@ def test_answer_without_matching_context_does_not_call_llm(monkeypatch):
 
     assert response.status_code == 200
     result = response.json()
-    assert "لم أجد معلومات ذات صلة" in result["answer"]
+    assert result["answer"] == (
+        "### الإجابة\n"
+        "لم أجد معلومات كافية في الوثائق المتاحة للإجابة عن هذا السؤال.\n\n"
+        "### المصادر\n"
+        "لا توجد مصادر متاحة."
+    )
     assert result["sources"] == []
     assert llm_client.chat.completions.request is None
 

@@ -43,7 +43,9 @@ class Settings(BaseSettings):
     qdrant_timeout: int = Field(default=30)
 
     max_pdf_size_bytes: int = Field(default=50 * 1024 * 1024, gt=0)
-    max_pdf_pages: int = Field(default=500, gt=0)
+
+    ollama_base_url: str = Field(default="http://localhost:11434/v1")
+    ollama_model: str = Field(default="qwen2.5:1.5b")
 
     openai_api_key: str | None = Field(default=None)
     openai_model: str = Field(default="gpt-4o-mini")

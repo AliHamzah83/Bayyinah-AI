@@ -7,11 +7,11 @@ from src.embeddings import EMBEDDING_DIMENSIONS, EmbeddingService
 from src.storage.qdrant_store import QdrantVectorStore, RetrievalService
 
 
-def get_retrieval_service() -> RetrievalService:
+def get_retrieval_service(*, collection_name: str | None = None) -> RetrievalService:
     """Construct the retrieval service using the project’s shared Qdrant abstraction."""
     settings = get_settings()
     vector_store = QdrantVectorStore(
-        collection_name=settings.qdrant_collection_name,
+        collection_name=collection_name or settings.qdrant_collection_name,
         vector_size=EMBEDDING_DIMENSIONS,
         timeout=settings.qdrant_timeout,
     )
